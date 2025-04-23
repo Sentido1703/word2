@@ -1,0 +1,4 @@
+http://127.0.0.1:5000/officesvc/report?type=grouplist&id=1&template=grouplist_template
+
+
+postgresql://postgres:пароль@localhost:хост/Имя_БД
