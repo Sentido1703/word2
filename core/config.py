@@ -4,7 +4,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     """Настройки приложения"""
-    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgres://postgres:12345678@localhost:5432/sentido")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "postgres://postgres:12345678@localhost:5433/sentido")
 
     TEMPLATE_DIR: str = os.getenv("TEMPLATE_DIR", "./templates")
     OUTPUT_DIR: str = os.getenv("OUTPUT_DIR", "./output")
