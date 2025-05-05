@@ -1,7 +1,7 @@
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any
 
 from core.config import settings
 from models.models import Template
@@ -72,7 +72,6 @@ class BaseDocumentService(ABC):
         if not text or not isinstance(text, str):
             return text
 
-        # Сначала заменяем плейсхолдеры вида {{placeholder}}
         pattern = r"\{\{([^}]+)\}\}"
 
         def replace_match(match):
@@ -81,11 +80,9 @@ class BaseDocumentService(ABC):
 
         text = re.sub(pattern, replace_match, text)
 
-        # Теперь заменяем одиночные символьные плейсхолдеры
         single_chars = {'S', 'M', 'B', 'G', 'P', 'N'}
         for char in single_chars:
             if char in replacements:
-                # Заменяем символ только если он стоит как отдельное слово
                 text = re.sub(r'\b' + char + r'\b', str(replacements[char]), text)
 
         return text

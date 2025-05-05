@@ -1,419 +1,1248 @@
-import os
-import re
+"""
+Улучшенная реализация DocxService с точной заменой буквенных плейсхолдеров
+для каждого типа шаблона
+"""
 import random
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Tuple
 from docx import Document
 from docx.shared import Pt
 
 from services.base_document_service import BaseDocumentService
 from models.models import (
     Group, Student, Teacher, Discipline, ExamQuestion,
-    ControlWork, ScheduleItem, Classroom
+    ScheduleItem, Publication
 )
 
 
 class DocxService(BaseDocumentService):
     """
-    Сервис для обработки DOCX-документов
+    Сервис для обработки DOCX-документов с точной заменой плейсхолдеров
     """
+
+    TEMPLATE_TYPE_MASTER_TITLE = "master_title"
+    TEMPLATE_TYPE_BACHELOR_TITLE = "bachelor_title"
+    TEMPLATE_TYPE_EXAM_TICKET = "exam_ticket"
+    TEMPLATE_TYPE_ABSTRACT = "abstract"
+    TEMPLATE_TYPE_LAB_WORK = "lab_work"
+    TEMPLATE_TYPE_COURSE_WORK = "course_work"
+    TEMPLATE_TYPE_COURSE_PROJECT = "course_project"
+    TEMPLATE_TYPE_PRACTICE_THEMES = "practice_themes"
+    TEMPLATE_TYPE_PUBLICATIONS = "publications"
+    TEMPLATE_TYPE_LITERATURE = "literature"
+    TEMPLATE_TYPE_EXAM_QUESTIONS = "exam_questions"
+    TEMPLATE_TYPE_TEACHER_SCHEDULE = "teacher_schedule"
+    TEMPLATE_TYPE_SECTION_PROGRAM = "section_program"
+    TEMPLATE_TYPE_PRACTICE_REPORT = "practice_report"
+    TEMPLATE_TYPE_TASK = "task"
+    TEMPLATE_TYPE_CLASSROOM_SCHEDULE = "classroom_schedule"
+    TEMPLATE_TYPE_GENERIC = "generic"
 
     async def load_document(self, template_path: str) -> Document:
         """
         Загружает DOCX-документ из файла шаблона
-
-        Args:
-            template_path: Путь к файлу шаблона
-
-        Returns:
-            Объект документа Word
         """
         return Document(template_path)
 
     async def save_document(self, document: Document, output_path: str) -> None:
         """
         Сохраняет DOCX-документ в файл
-
-        Args:
-            document: Объект документа Word
-            output_path: Путь для сохранения
         """
         document.save(output_path)
+
+    async def determine_template_type(self, template_id: int, template_name: str) -> str:
+        """
+        Определяет тип шаблона по его ID и имени
+        """
+        template_name_lower = template_name.lower()
+
+        print(template_name_lower)
+
+        if "титул маг" in template_name_lower:
+            return self.TEMPLATE_TYPE_MASTER_TITLE
+        elif "титул бак" in template_name_lower:
+            return self.TEMPLATE_TYPE_BACHELOR_TITLE
+        elif "билет" in template_name_lower:
+            return self.TEMPLATE_TYPE_EXAM_TICKET
+        elif "реферат" in template_name_lower:
+            return self.TEMPLATE_TYPE_ABSTRACT
+        elif "лабораторная работа" in template_name_lower:
+            return self.TEMPLATE_TYPE_LAB_WORK
+        elif "курсовая работа" in template_name_lower:
+            return self.TEMPLATE_TYPE_COURSE_WORK
+        elif "курсовой проект" in template_name_lower:
+            return self.TEMPLATE_TYPE_COURSE_PROJECT
+        elif "практических работ" in template_name_lower:
+            return self.TEMPLATE_TYPE_PRACTICE_THEMES
+        elif "публикаций" in template_name_lower:
+            return self.TEMPLATE_TYPE_PUBLICATIONS
+        elif "литератур" in template_name_lower:
+            return self.TEMPLATE_TYPE_LITERATURE
+        elif "вопрос" in template_name_lower and ("экзамен" in template_name_lower or "зачет" in template_name_lower):
+            return self.TEMPLATE_TYPE_EXAM_QUESTIONS
+        elif "расписание преподавателей" in template_name_lower:
+            return self.TEMPLATE_TYPE_TEACHER_SCHEDULE
+        elif "секции" in template_name_lower:
+            return self.TEMPLATE_TYPE_SECTION_PROGRAM
+        elif "практик" in template_name_lower and "отчет" in template_name_lower:
+            return self.TEMPLATE_TYPE_PRACTICE_REPORT
+        elif "задание" in template_name_lower:
+            return self.TEMPLATE_TYPE_TASK
+        elif "загруженность" in template_name_lower or 'загруженность аудиторий' == template_name_lower:
+            return self.TEMPLATE_TYPE_CLASSROOM_SCHEDULE
+        else:
+
+            return self.TEMPLATE_TYPE_GENERIC
+
+    async def find_highlighted_text(self, document: Document) -> List[Tuple[Any, str]]:
+        """
+        Находит все фрагменты текста с желтым выделением
+        """
+        highlighted_items = []
+
+        for paragraph in document.paragraphs:
+            for run in paragraph.runs:
+                if hasattr(run, 'font') and hasattr(run.font, 'highlight_color') and run.font.highlight_color:
+                    highlighted_items.append((run, run.text.strip()))
+
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            if hasattr(run, 'font') and hasattr(run.font,
+                                                                'highlight_color') and run.font.highlight_color:
+                                highlighted_items.append((run, run.text.strip()))
+
+        return highlighted_items
+
+    async def replace_highlighted_text(self, document: Document, replacement_map: Dict[str, str]) -> None:
+        """
+        Заменяет выделенный текст на соответствующие значения и убирает желтое выделение
+        """
+        highlighted_items = await self.find_highlighted_text(document)
+
+        for run, text in highlighted_items:
+            if text in replacement_map:
+
+                run.text = str(replacement_map[text])
+
+                run.font.highlight_color = None
+
+            elif len(text) == 1 and text in replacement_map:
+
+                run.text = str(replacement_map[text])
+
+            run.font.highlight_color = None
 
     async def apply_times_new_roman(self, document: Document) -> None:
         """
         Устанавливает шрифт Times New Roman для всех элементов документа
-
-        Args:
-            document: Объект документа Word
         """
-        # Для всех параграфов
+
         for paragraph in document.paragraphs:
             for run in paragraph.runs:
                 run.font.name = "Times New Roman"
-                # Сохраняем оригинальный размер, если он есть
+
                 if run.font.size:
                     continue
-                # Иначе устанавливаем стандартный размер 12pt
+
                 run.font.size = Pt(12)
 
-        # Для всех таблиц
         for table in document.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
                         for run in paragraph.runs:
                             run.font.name = "Times New Roman"
-                            # Сохраняем оригинальный размер, если он есть
+
                             if run.font.size:
                                 continue
-                            # Иначе устанавливаем стандартный размер 12pt
+
                             run.font.size = Pt(12)
 
-    async def replace_yellow_highlights(self, document: Document, highlights_replacements: Dict[str, Any]) -> None:
+    async def process_master_title(self, document: Document, params: Dict[str, Any]) -> None:
         """
-        Заменяет текст с желтым выделением на соответствующие значения
+        Обрабатывает шаблон титульного листа магистерской работы
+
+        Шаблон титул маг - "на тему" -  J - "Фамилия Имя Отчество" - N
+        Шифр P Группа - T
+        Руководитель работы И. О. Фамилия - О
+        """
+
+        discipline_id = params.get('discipline_id')
+        student_id = params.get('student_id')
+        teacher_id = params.get('teacher_id')
+
+        replacements = {}
+
+        if discipline_id:
+            discipline = await Discipline.get(id=discipline_id)
+            replacements['J'] = "Исследование и разработка методов машинного обучения"
+        else:
+            replacements['J'] = "Исследование и разработка методов машинного обучения"
+
+        if student_id:
+            student = await Student.get(id=student_id).prefetch_related('group')
+            replacements['N'] = student.full_name
+            if student.group:
+                replacements['T'] = student.group.code
+            else:
+                replacements['T'] = "КМБО-05-21"
+
+        if teacher_id:
+            teacher = await Teacher.get(id=teacher_id)
+
+            name_parts = teacher.full_name.split()
+            if len(name_parts) >= 3:
+
+                initials = f"{name_parts[1][0]}.{name_parts[2][0]}."
+                replacements['O'] = f"{initials} {name_parts[0]}"
+            else:
+                replacements['O'] = teacher.full_name
+
+        await self.replace_highlighted_text(document, replacements)
+
+    async def process_bachelor_title(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон титульного листа бакалаврской работы
+
+        Шаблон титул бал - "на тему" -  J - "Фамилия Имя Отчество" - N
+        Шифр P Группа - T
+        Руководитель работы - И. О. Фамилия - О
+        Консультант (*при наличии*) - *ученая степень, ученое звание, должность - U*
+        И. О. Фамилия - M
+        """
+
+        discipline_id = params.get('discipline_id')
+        student_id = params.get('student_id')
+        teacher_id = params.get('teacher_id')
+
+        replacements = {}
+
+        if discipline_id:
+            discipline = await Discipline.get(id=discipline_id)
+            replacements['J'] = "Разработка программного обеспечения"
+        else:
+            replacements['J'] = "Разработка программного обеспечения"
+
+        if student_id:
+            student = await Student.get(id=student_id).prefetch_related('group')
+            replacements['N'] = student.full_name
+            if student.group:
+                replacements['T'] = student.group.code
+            else:
+                replacements['T'] = "КМБО-05-21"
+
+        if teacher_id:
+            teacher = await Teacher.get(id=teacher_id)
+
+            name_parts = teacher.full_name.split()
+            if len(name_parts) >= 3:
+                initials = f"{name_parts[1][0]}.{name_parts[2][0]}."
+                replacements['O'] = f"{initials} {name_parts[0]}"
+                replacements['M'] = f"{initials} {name_parts[0]}"
+            else:
+                replacements['O'] = teacher.full_name
+                replacements['M'] = teacher.full_name
+
+            replacements['U'] = "к.т.н., доцент"
+        else:
+
+            replacements['O'] = "И.О. Фамилия"
+            replacements['M'] = "И.О. Фамилия"
+            replacements['U'] = "к.т.н., доцент"
+
+        await self.replace_highlighted_text(document, replacements)
+
+    async def process_exam_ticket(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон экзаменационного билета
+        """
+        discipline_id = params.get('discipline_id')
+        ticket_number = params.get('ticket_number', random.randint(1, 30))
+
+        replacements = {
+            'K': str(ticket_number),
+            'T': "Программирование и алгоритмы",
+            'N': "1"
+        }
+
+        example_questions = [
+            "Основные принципы программирования",
+            "Алгоритмы сортировки и их сложность",
+            "Методы оптимизации программного кода"
+        ]
+
+        if discipline_id:
+            discipline = await Discipline.get(id=discipline_id)
+            replacements['T'] = discipline.name
+
+            questions = await ExamQuestion.filter(discipline_id=discipline_id).order_by('number')
+
+            if questions:
+                selected_questions = questions[:3] if len(questions) <= 3 else random.sample(list(questions), 3)
+                example_questions = [q.text for q in selected_questions]
+
+        success = await self.replace_exam_ticket_questions(document, example_questions)
+
+        if not success:
+            print("Не удалось найти плейсхолдеры вопросов в таблице, пробуем другой метод...")
+
+            await self.replace_exam_ticket_questions(document, example_questions)
+
+        await self.replace_highlighted_text(document, replacements)
+
+        for paragraph in document.paragraphs:
+            if "БИЛЕТ" in paragraph.text or "Билет" in paragraph.text:
+                paragraph.text = paragraph.text.replace("№", f"№{ticket_number}")
+                paragraph.text = paragraph.text.replace("БИЛЕТ", f"БИЛЕТ №{ticket_number}")
+
+    async def process_abstract(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон титульного листа реферата
+
+        по дисциплине N
+        на тему: M
+        Обучающийся: G
+        Руководитель: P
+        """
+        discipline_id = params.get('discipline_id')
+        student_id = params.get('student_id')
+        teacher_id = params.get('teacher_id')
+
+        replacements = {}
+
+        if discipline_id:
+            discipline = await Discipline.get(id=discipline_id)
+            replacements['N'] = discipline.name
+        else:
+            replacements['N'] = "Программирование и алгоритмы"
+
+        if student_id:
+            student = await Student.get(id=student_id)
+            replacements['G'] = student.full_name
+        else:
+            replacements['G'] = "Иванов Иван Иванович"
+
+        if teacher_id:
+            teacher = await Teacher.get(id=teacher_id)
+            replacements['P'] = teacher.full_name
+        else:
+            replacements['P'] = "Петров Петр Петрович"
+
+        replacements['M'] = "Современные методы анализа данных"
+
+        await self.replace_highlighted_text(document, replacements)
+
+    async def find_table_cells_with_content(self, document: Document, text_patterns: List[str]) -> List[
+        Tuple[Any, str]]:
+        """
+        Находит ячейки таблицы, содержащие указанные паттерны текста
 
         Args:
-            document: документ Word
-            highlights_replacements: словарь с заменами
-        """
-        # Для всех параграфов
-        for paragraph in document.paragraphs:
-            for run in paragraph.runs:
-                # Проверяем наличие выделения
-                if hasattr(run, 'font') and hasattr(run.font, 'highlight_color') and run.font.highlight_color:
-                    # Заменяем текст в зависимости от его содержимого
-                    if 'discipline_name' in highlights_replacements and run.text.strip():
-                        run.text = highlights_replacements['discipline_name']
-                    elif 'institute' in highlights_replacements and run.text.lower().strip() == 'ипи':
-                        run.text = highlights_replacements['institute']
-                    elif 'department' in highlights_replacements and 'бк' in run.text.lower().strip():
-                        run.text = highlights_replacements['department']
-                    elif 'education_level' in highlights_replacements and run.text.lower().strip() == 'бакалавриат':
-                        run.text = highlights_replacements['education_level']
-                    elif 'hours' in highlights_replacements and '/' in run.text.strip():
-                        run.text = highlights_replacements['hours']
+            document: Документ Word
+            text_patterns: Список паттернов текста для поиска
 
-        # Для всех таблиц
+        Returns:
+            Список пар (ячейка, найденный_паттерн)
+        """
+        result = []
+
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    cell_text = cell.text.strip()
+
+                    for pattern in text_patterns:
+                        if pattern in cell_text:
+                            result.append((cell, pattern))
+                            break
+
+        return result
+
+    async def replace_cell_content(self, cell, pattern: str, replacement: str) -> None:
+        """
+        Заменяет содержимое ячейки таблицы
+
+        Args:
+            cell: Ячейка таблицы
+            pattern: Текст для замены
+            replacement: Новый текст
+        """
+
+        for paragraph in cell.paragraphs:
+
+            if pattern in paragraph.text:
+                alignment = paragraph.alignment
+
+                new_text = paragraph.text.replace(pattern, replacement)
+
+                paragraph.clear()
+                run = paragraph.add_run(new_text)
+
+                run.font.name = "Times New Roman"
+
+                paragraph.alignment = alignment
+
+    async def process_lab_work(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон титульного листа лабораторной работы
+
+        по дисциплине N
+        на тему: M
+        Обучающийся: G
+        Группа: S
+        Руководитель: P
+        """
+        discipline_id = params.get('discipline_id')
+        student_id = params.get('student_id')
+        teacher_id = params.get('teacher_id')
+
+        replacements = {}
+
+        if discipline_id:
+            discipline = await Discipline.get(id=discipline_id)
+            replacements['N'] = discipline.name
+        else:
+            replacements['N'] = "Программирование и алгоритмы"
+
+        if student_id:
+            student = await Student.get(id=student_id).prefetch_related('group')
+            replacements['G'] = student.full_name
+            if student.group:
+                replacements['S'] = student.group.code
+            else:
+                replacements['S'] = "КМБО-05-21"
+        else:
+            replacements['G'] = "Иванов Иван Иванович"
+            replacements['S'] = "КМБО-05-21"
+
+        if teacher_id:
+            teacher = await Teacher.get(id=teacher_id)
+            replacements['P'] = teacher.full_name
+        else:
+            replacements['P'] = "Петров Петр Петрович"
+
+        replacements['M'] = "Разработка алгоритма сортировки данных"
+
+        await self.replace_highlighted_text(document, replacements)
+
+    async def process_course_work(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон титульного листа курсовой работы
+        (Аналогичен лабораторной работе)
+        """
+        await self.process_lab_work(document, params)
+
+    async def process_course_project(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон титульного листа курсового проекта
+        (Аналогичен лабораторной работе)
+        """
+        await self.process_lab_work(document, params)
+
+    async def process_practice_themes(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон тем практических работ
+
+        Предмет: G
+        Темы практических работ
+        Семестр: L
+        N, N, N - сами темы
+        """
+        discipline_id = params.get('discipline_id')
+
+        replacements = {
+            'L': "1"
+        }
+
+        if discipline_id:
+            discipline = await Discipline.get(id=discipline_id)
+            replacements['G'] = discipline.name
+
+            practice_themes = [
+                "Разработка алгоритмов обработки данных",
+                "Использование структур данных",
+                "Оптимизация вычислительных процессов"
+            ]
+
+            highlighted_items = await self.find_highlighted_text(document)
+            theme_index = 0
+
+            for run, text in highlighted_items:
+                if text == 'N' and theme_index < len(practice_themes):
+                    run.text = practice_themes[theme_index]
+                    theme_index += 1
+        else:
+            replacements['G'] = "Программирование и алгоритмы"
+
+            practice_themes = [
+                "Разработка алгоритмов обработки данных",
+                "Использование структур данных",
+                "Оптимизация вычислительных процессов"
+            ]
+
+            highlighted_items = await self.find_highlighted_text(document)
+            theme_index = 0
+
+            for run, text in highlighted_items:
+                if text == 'N' and theme_index < len(practice_themes):
+                    run.text = practice_themes[theme_index]
+                    theme_index += 1
+
+        await self.replace_highlighted_text(document, replacements)
+
+    async def replace_exam_ticket_questions(self, document, questions):
+        """
+        Метод, предназначенный специально для замены вопросов в таблице билета
+
+        Args:
+            document: Документ Word
+            questions: Список вопросов (минимум 3)
+        """
+        print("Начинаем поиск и замену вопросов в билете...")
+
+        if len(questions) < 3:
+            questions = questions + ["Вопрос по умолчанию"] * (3 - len(questions))
+
+        found_placeholders = []
+
+        table_index = 0
+        for table in document.tables:
+            print(f"Таблица #{table_index}:")
+            row_index = 0
+            for row in table.rows:
+                print(f"  Строка #{row_index}:")
+                cell_index = 0
+                for cell in row.cells:
+                    print(f"    Ячейка #{cell_index}: '{cell.text}'")
+                    cell_index += 1
+                row_index += 1
+            table_index += 1
+
+        for table in document.tables:
+            for row_index, row in enumerate(table.rows):
+                for cell_index, cell in enumerate(row.cells):
+                    cell_text = cell.text.strip()
+
+                    if cell_text.startswith("1.") or cell_text.startswith("2.") or cell_text.startswith("3."):
+                        print(f"Найдена ячейка с номером: '{cell_text}'")
+
+                        if "M" in cell_text:
+                            print(f"Внутри ячейки есть M: '{cell_text}'")
+                            found_placeholders.append((cell, row_index, cell_index))
+
+
+                        elif cell_index + 1 < len(row.cells):
+                            next_cell = row.cells[cell_index + 1]
+                            next_text = next_cell.text.strip()
+                            if next_text == "M":
+                                print(f"M найдена в следующей ячейке после номера")
+                                found_placeholders.append((next_cell, row_index, cell_index + 1))
+
+        if not found_placeholders:
+            print("Не найдены ячейки с номерами, ищем просто M...")
+            for table in document.tables:
+                for row_index, row in enumerate(table.rows):
+                    for cell_index, cell in enumerate(row.cells):
+                        if cell.text.strip() == "M":
+                            print(f"Найдена ячейка только с M")
+                            found_placeholders.append((cell, row_index, cell_index))
+
+        if not found_placeholders:
+            for table in document.tables:
+                for row_index, row in enumerate(table.rows):
+                    for cell_index, cell in enumerate(row.cells):
+                        for paragraph in cell.paragraphs:
+                            if "M" in paragraph.text:
+                                found_placeholders.append((cell, row_index, cell_index, paragraph))
+
+        question_runs = []
         for table in document.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
                         for run in paragraph.runs:
-                            # Проверяем наличие выделения
-                            if hasattr(run, 'font') and hasattr(run.font,
-                                                                'highlight_color') and run.font.highlight_color:
-                                # Производим специальные замены для таблиц БРС
-                                if 'control_works' in highlights_replacements and run.text.strip():
-                                    # Определяем, какой элемент контрольной работы это
-                                    text_lower = run.text.lower().strip()
-                                    if 'контрольная работа' in text_lower or 'тестирование' in text_lower:
-                                        # Это название контрольной работы, находим её номер
-                                        for i, work in enumerate(highlights_replacements['control_works']):
-                                            if f"№{i + 1}" in run.text or (i == 3 and 'тест' in text_lower):
-                                                run.text = work['name']
-                                                break
-                                    elif 'очно' in text_lower or 'сдо' in text_lower:
-                                        # Это формат контрольной работы
-                                        for i, work in enumerate(highlights_replacements['control_works']):
-                                            if i == int(paragraph._p.xpath('./preceding-sibling::w:p')[
-                                                            0].text_content().strip()) - 1:
-                                                run.text = work['format']
-                                                break
-                                    elif run.text.isdigit() and int(run.text) == 10:
-                                        # Это баллы за контрольную работу
-                                        for i, work in enumerate(highlights_replacements['control_works']):
-                                            if i == int(paragraph._p.xpath('./preceding-sibling::w:p')[
-                                                            0].text_content().strip()) - 1:
-                                                run.text = str(work['max_score'])
-                                                break
-                                    elif run.text.isdigit() and int(run.text) in [6, 10, 14, 16]:
-                                        # Это период проведения
-                                        for i, work in enumerate(highlights_replacements['control_works']):
-                                            if i == int(paragraph._p.xpath('./preceding-sibling::w:p')[
-                                                            0].text_content().strip()) - 1:
-                                                run.text = f"{work['week']} неделя"
-                                                break
+                            run_text = run.text.strip()
+                            if run_text == "M":
+                                question_runs.append(run)
 
-    async def process_exam_ticket(self, document: Document, discipline: Discipline,
-                                  ticket_number: Optional[int] = None) -> Document:
+        if question_runs:
+            for i, run in enumerate(question_runs[:3]):
+                if i < len(questions):
+                    run.text = questions[i]
+                    if hasattr(run, 'font') and hasattr(run.font, 'highlight_color'):
+                        run.font.highlight_color = None
+
+
+        elif found_placeholders:
+            for i, placeholder_info in enumerate(found_placeholders[:3]):
+                if i < len(questions):
+                    if len(placeholder_info) == 4:
+                        cell, _, _, paragraph = placeholder_info
+                        paragraph.text = paragraph.text.replace("M", questions[i])
+                    else:
+                        cell, _, _ = placeholder_info
+                        cell.text = questions[i]
+
+        return len(question_runs) > 0 or len(found_placeholders) > 0
+
+    async def replace_date_time_placeholders(self, paragraph, replacements):
         """
-        Специальная обработка для экзаменационного билета
+        Заменяет плейсхолдеры даты и времени, сохраняя исходное форматирование
 
         Args:
-            document: объект документа Word
-            discipline: объект дисциплины
-            ticket_number: номер билета (если не указан, выбирается случайно)
-
-        Returns:
-            Обработанный документ Word
+            paragraph: Параграф с плейсхолдерами
+            replacements: Словарь замен
         """
-        # Получаем вопросы к экзамену для данной дисциплины
-        questions = await ExamQuestion.filter(discipline_id=discipline.id).order_by('number')
 
-        if not questions:
-            # Если нет вопросов, создаем тестовые
-            questions_data = [
-                {"number": 1, "text": "Основные принципы и концепции дисциплины"},
-                {"number": 2, "text": "Ключевые методы и подходы в изучаемой области"},
-                {"number": 3, "text": "Практическое применение теоретических знаний"}
-            ]
-        else:
-            # Преобразуем в формат для удобства использования
-            questions_data = [{"number": q.number, "text": q.text} for q in questions]
+        full_text = paragraph.text
 
-        # Если не указан номер билета, выбираем случайно от 1 до 30
-        if not ticket_number:
-            ticket_number = random.randint(1, 30)
-
-        # Выбираем случайные вопросы (если их меньше 3, берем все имеющиеся)
-        if len(questions_data) <= 3:
-            selected_questions = questions_data
-        else:
-            # Выбираем 3 случайных вопроса
-            selected_questions = random.sample(questions_data, 3)
-
-        # Определяем информацию для замены в шаблоне
-        replacements = {
-            "ticket_number": str(ticket_number),
-            "discipline_name": discipline.name,
-            "course": "Программирование и алгоритмы",  # Можно получить из дисциплины или группы
-            "semester": "1",  # Можно получить из параметров
-            "questions": selected_questions
+        patterns = {
+            "XX-XX-XXXX, XX:XX": replacements.get('XX-XX-XXXX, XX:XX', '01-05-2025, 14:30'),
+            "XX-XX-XXXX,XX:XX": replacements.get('XX-XX-XXXX, XX:XX', '01-05-2025, 14:30'),
+            "XX:XX-XX:XX": replacements.get('XX:XX-XX:XX', '09:00-10:30'),
+            "XX:XX – XX:XX": replacements.get('XX:XX – XX:XX', '09:00 – 10:30'),
+            "XX-XX-XXXX": replacements.get('XX-XX-XXXX', '01-05-2025')
         }
 
-        # Обрабатываем таблицы в документе для замены содержимого
+        found_pattern = None
+        for pattern in patterns:
+            if pattern in full_text:
+                found_pattern = pattern
+                break
+
+        if not found_pattern:
+            return False
+
+        original_runs = list(paragraph.runs)
+
+        temp_text = ""
+        pattern_start_idx = -1
+
+        for i, run in enumerate(original_runs):
+            temp_text += run.text
+            if found_pattern in temp_text and pattern_start_idx == -1:
+                pattern_start_idx = temp_text.find(found_pattern)
+
+        if pattern_start_idx == -1:
+            return False
+
+        for run in paragraph.runs:
+            run.text = ""
+
+        new_text = full_text.replace(found_pattern, patterns[found_pattern])
+
+        if original_runs:
+            new_run = paragraph.add_run(new_text)
+
+            first_run = original_runs[0]
+            if hasattr(first_run, 'font'):
+
+                if hasattr(first_run.font, 'name'):
+                    new_run.font.name = first_run.font.name
+
+                if hasattr(first_run.font, 'size') and first_run.font.size:
+                    new_run.font.size = first_run.font.size
+
+                if hasattr(first_run.font, 'bold'):
+                    new_run.font.bold = first_run.font.bold
+
+                if hasattr(first_run.font, 'italic'):
+                    new_run.font.italic = first_run.font.italic
+
+                if hasattr(first_run.font, 'underline'):
+                    new_run.font.underline = first_run.font.underline
+
+        return True
+
+    async def process_publications(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон списка публикаций
+
+        Группа G
+        Студент T
+        Тема J
+        """
+        student_id = params.get('student_id')
+
+        replacements = {}
+
+        if student_id:
+            student = await Student.get(id=student_id).prefetch_related('group')
+            replacements['T'] = student.full_name
+
+            if student.group:
+                replacements['G'] = student.group.code
+            else:
+                replacements['G'] = "КМБО-05-21"
+
+            publications = await Publication.filter(student_id=student_id)
+
+            if publications:
+
+                replacements['J'] = publications[0].title
+            else:
+                replacements['J'] = "Исследование методов машинного обучения"
+        else:
+
+            replacements['T'] = "Иванов Иван Иванович"
+            replacements['G'] = "КМБО-05-21"
+            replacements['J'] = "Исследование методов машинного обучения"
+
+        await self.replace_highlighted_text(document, replacements)
+
+    async def process_literature(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон списка литературы
+
+        Предмет G
+        N, N - сами названия
+        """
+        discipline_id = params.get('discipline_id')
+
+        replacements = {}
+
+        if discipline_id:
+            discipline = await Discipline.get(id=discipline_id)
+            replacements['G'] = discipline.name
+
+            literature_examples = [
+                "Кормен Т., Лейзерсон Ч., Ривест Р., Штайн К. Алгоритмы: построение и анализ, 3-е изд. — М.: «Вильямс», 2013.",
+                "Кнут Д. Э. Искусство программирования. Том 1. Основные алгоритмы, 3-е изд. — М.: «Вильямс», 2006."
+            ]
+
+            highlighted_items = await self.find_highlighted_text(document)
+            lit_index = 0
+
+            for run, text in highlighted_items:
+                if text == 'N' and lit_index < len(literature_examples):
+                    run.text = literature_examples[lit_index]
+                    lit_index += 1
+        else:
+            replacements['G'] = "Программирование и алгоритмы"
+
+            literature_examples = [
+                "Кормен Т., Лейзерсон Ч., Ривест Р., Штайн К. Алгоритмы: построение и анализ, 3-е изд. — М.: «Вильямс», 2013.",
+                "Кнут Д. Э. Искусство программирования. Том 1. Основные алгоритмы, 3-е изд. — М.: «Вильямс», 2006."
+            ]
+
+            highlighted_items = await self.find_highlighted_text(document)
+            lit_index = 0
+
+            for run, text in highlighted_items:
+                if text == 'N' and lit_index < len(literature_examples):
+                    run.text = literature_examples[lit_index]
+                    lit_index += 1
+
+        await self.replace_highlighted_text(document, replacements)
+
+    async def replace_split_time_placeholder(self, paragraph, new_time_value):
+        """
+        Заменяет разбитый плейсхолдер времени на новое значение
+
+        Args:
+            paragraph: Параграф, содержащий разбитый плейсхолдер
+            new_time_value: Новое значение времени (например, '09:00-10:30')
+        """
+
+        runs_to_modify = []
+        for run in paragraph.runs:
+            if 'X' in run.text or ':' in run.text or '-' in run.text:
+                runs_to_modify.append(run)
+
+        if len(runs_to_modify) < 3:
+            return
+
+        if len(runs_to_modify) == len(new_time_value):
+            for i, run in enumerate(runs_to_modify):
+                run.text = new_time_value[i]
+                if hasattr(run, 'font') and hasattr(run.font, 'highlight_color'):
+                    run.font.highlight_color = None
+
+
+        else:
+
+            if runs_to_modify:
+                runs_to_modify[0].text = new_time_value
+                if hasattr(runs_to_modify[0], 'font') and hasattr(runs_to_modify[0].font, 'highlight_color'):
+                    runs_to_modify[0].font.highlight_color = None
+
+                for run in runs_to_modify[1:]:
+                    run.text = ""
+                    if hasattr(run, 'font') and hasattr(run.font, 'highlight_color'):
+                        run.font.highlight_color = None
+
+    async def process_exam_questions(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон списка вопросов для экзамена или зачета
+
+        Предмет G
+        Семестр T
+        Вопросы к зачету/экзамену
+        N, N, N - сами вопросы
+        """
+        discipline_id = params.get('discipline_id')
+
+        replacements = {
+            'T': "1"
+        }
+
+        if discipline_id:
+            discipline = await Discipline.get(id=discipline_id)
+            replacements['G'] = discipline.name
+
+            questions = await ExamQuestion.filter(discipline_id=discipline_id).order_by('number')
+
+            if questions:
+
+                highlighted_items = await self.find_highlighted_text(document)
+                q_index = 0
+
+                for run, text in highlighted_items:
+                    if text == 'N' and q_index < len(questions):
+                        run.text = questions[q_index].text
+                        q_index += 1
+            else:
+
+                example_questions = [
+                    "Основные принципы программирования",
+                    "Алгоритмы сортировки и их сложность",
+                    "Методы оптимизации программного кода"
+                ]
+
+                highlighted_items = await self.find_highlighted_text(document)
+                q_index = 0
+
+                for run, text in highlighted_items:
+                    if text == 'N' and q_index < len(example_questions):
+                        run.text = example_questions[q_index]
+                        q_index += 1
+        else:
+            replacements['G'] = "Программирование и алгоритмы"
+
+            example_questions = [
+                "Основные принципы программирования",
+                "Алгоритмы сортировки и их сложность",
+                "Методы оптимизации программного кода"
+            ]
+
+            highlighted_items = await self.find_highlighted_text(document)
+            q_index = 0
+
+            for run, text in highlighted_items:
+                if text == 'N' and q_index < len(example_questions):
+                    run.text = example_questions[q_index]
+                    q_index += 1
+
+        await self.replace_highlighted_text(document, replacements)
+
+    async def process_teacher_schedule(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон расписания преподавателей
+
+        ФИО - М
+        ДАТА - XX-XX-XXXX
+        ВРЕМЯ - XX:XX-XX:XX
+        ДИСЦИПЛИНА - P
+        """
+        teacher_id = params.get('teacher_id')
+        day_of_week = params.get('day_of_week')
+
+        replacements = {
+            'XX-XX-XXXX': '01-05-2025',
+            'XX:XX-XX:XX': '09:00-10:30'
+        }
+
+        if teacher_id:
+            teacher = await Teacher.get(id=teacher_id)
+            replacements['М'] = teacher.full_name
+            replacements['M'] = teacher.full_name
+
+            query = ScheduleItem.filter(teacher_id=teacher_id).prefetch_related('discipline')
+            if day_of_week:
+                query = query.filter(day_of_week=day_of_week)
+
+            schedule_items = await query.order_by('time_slot__number')
+
+            if schedule_items:
+
+                replacements['P'] = schedule_items[0].discipline.name
+
+                if hasattr(schedule_items[0], 'time_slot') and schedule_items[0].time_slot:
+                    time_slot = schedule_items[0].time_slot
+                    replacements['XX:XX-XX:XX'] = f"{time_slot.start_time}-{time_slot.end_time}"
+            else:
+                replacements['P'] = "Программирование и алгоритмы"
+        else:
+            replacements['М'] = "Иванов Иван Иванович"
+            replacements['M'] = "Иванов Иван Иванович"
+            replacements['P'] = "Программирование и алгоритмы"
+
+        for paragraph in document.paragraphs:
+
+            has_time_components = False
+            x_count = 0
+
+            for run in paragraph.runs:
+                if 'X' in run.text:
+                    x_count += run.text.count('X')
+                    has_time_components = True
+
+            if has_time_components and x_count >= 6:
+                await self.replace_split_time_placeholder(paragraph, replacements['XX:XX-XX:XX'])
+
         for table in document.tables:
-            for row_idx, row in enumerate(table.rows):
-                for col_idx, cell in enumerate(row.cells):
-                    # Обрабатываем все параграфы в ячейке
+            for row in table.rows:
+                for cell in row.cells:
                     for paragraph in cell.paragraphs:
-                        # Заменяем номер билета и название дисциплины
-                        if "БИЛЕТ №" in paragraph.text:
-                            # Сохраняем форматирование
-                            original_text = paragraph.text
-                            # Создаем новый текст с заменой
-                            new_text = f"БИЛЕТ № {ticket_number} {discipline.name}"
-                            # Заменяем текст, сохраняя форматирование
-                            paragraph.text = new_text
 
-                        # Заменяем "Курс N" на "Курс [название]"
-                        if "Курс N" in paragraph.text:
-                            paragraph.text = paragraph.text.replace("Курс N", f"Курс {replacements['course']}")
+                        has_time_components = False
+                        x_count = 0
 
-                        # Заменяем "Семестр N" на "Семестр [номер]"
-                        if "Семестр N" in paragraph.text:
-                            paragraph.text = paragraph.text.replace("Семестр N", f"Семестр {replacements['semester']}")
+                        for run in paragraph.runs:
+                            if 'X' in run.text:
+                                x_count += run.text.count('X')
+                                has_time_components = True
 
-                        # Заменяем вопросы для билета
-                        for i, question in enumerate(selected_questions):
-                            question_marker = f"{i + 1}. M"
-                            if question_marker in paragraph.text:
-                                paragraph.text = paragraph.text.replace(question_marker, f"{i + 1}. {question['text']}")
+                        if has_time_components and x_count >= 6:
+                            await self.replace_split_time_placeholder(paragraph, replacements['XX:XX-XX:XX'])
 
-                        # Точечно ищем другие замены по контексту
-                        if "Дисциплина:" in paragraph.text:
-                            # Находим следующую ячейку и заменяем текст
-                            if col_idx + 1 < len(row.cells):
-                                next_cell = row.cells[col_idx + 1]
-                                if next_cell.text:
-                                    next_cell.text = discipline.name
+        await self.replace_highlighted_text(document, replacements)
 
-        return document
-
-    async def process_teacher_schedule(self, document: Document, teacher_id: int,
-                                       day_of_week: Optional[str] = None) -> Document:
+    async def process_section_program(self, document: Document, params: Dict[str, Any]) -> None:
         """
-        Специальная обработка для расписания преподавателя
+        Обрабатывает шаблон программы секции
 
-        Args:
-            document: объект документа Word
-            teacher_id: ID преподавателя
-            day_of_week: день недели (если не указан, берется всё расписание)
-
-        Returns:
-            Обработанный документ Word
+        Дата и время: XX-XX-XXXX, XX:XX
         """
-        # Получаем преподавателя
-        teacher = await Teacher.get(id=teacher_id)
+        replacements = {
+            'XX-XX-XXXX, XX:XX': '10-05-2025, 14:30'
+        }
 
-        # Получаем расписание преподавателя
-        schedule_query = ScheduleItem.filter(teacher_id=teacher_id).prefetch_related(
-            'time_slot', 'discipline', 'group', 'classroom'
-        )
-
-        # Если указан день недели, фильтруем по нему
-        if day_of_week:
-            schedule_query = schedule_query.filter(day_of_week=day_of_week)
-
-        # Получаем отсортированное расписание
-        schedule_items = await schedule_query.order_by('day_of_week', 'time_slot__number')
-
-        # Группируем расписание по дням недели
-        schedule_by_day = {}
-        for item in schedule_items:
-            day = item.day_of_week.value
-            if day not in schedule_by_day:
-                schedule_by_day[day] = []
-            schedule_by_day[day].append(item)
-
-        # Поиск таблицы для расписания в документе
-        schedule_table = None
-        for table in document.tables:
-            # Ищем таблицу, в которой есть нужные заголовки
-            first_row_text = ' '.join([cell.text for cell in table.rows[0].cells])
-            if "День" in first_row_text and "Время" in first_row_text:
-                schedule_table = table
-                break
-
-        # Если нашли таблицу расписания, заполняем её
-        if schedule_table:
-            # Определяем количество строк в таблице (исключая заголовок)
-            num_rows = len(schedule_table.rows)
-
-            # Если дней больше, чем строк (минус заголовок), добавляем строки
-            days_count = len(schedule_by_day)
-            if days_count > num_rows - 1:
-                for _ in range(days_count - (num_rows - 1)):
-                    schedule_table.add_row()
-
-            # Заполняем таблицу данными
-            row_index = 1  # Начинаем с первой строки после заголовка
-            for day, items in schedule_by_day.items():
-                if row_index < len(schedule_table.rows):
-                    row = schedule_table.rows[row_index]
-
-                    # Заполняем день недели
-                    if len(row.cells) > 0:
-                        row.cells[0].text = day
-
-                    # Формируем расписание на день
-                    schedule_text = ""
-                    for item in items:
-                        time_slot = f"{item.time_slot.start_time}-{item.time_slot.end_time}"
-                        discipline = item.discipline.name
-                        group = item.group.code
-                        classroom = item.classroom.name if item.classroom else "Нет аудитории"
-
-                        schedule_text += f"{time_slot}: {discipline}, {group}, {classroom}\n"
-
-                    # Заполняем расписание
-                    if len(row.cells) > 1:
-                        row.cells[1].text = schedule_text.strip()
-
-                    row_index += 1
-
-        # Обновляем информацию о преподавателе в документе
         for paragraph in document.paragraphs:
-            if "Расписание преподавателя:" in paragraph.text:
-                paragraph.text = f"Расписание преподавателя: {teacher.full_name}"
-                break
+            await self.replace_date_time_placeholders(paragraph, replacements)
 
-        # Если расписание пустое, добавляем сообщение
-        if not schedule_items:
-            for paragraph in document.paragraphs:
-                if "Расписание" in paragraph.text:
-                    document.add_paragraph("У преподавателя нет занятий в расписании.")
-                    break
-
-        return document
-
-    async def process_classroom_schedule(self, document: Document, classroom_id: int,
-                                         day_of_week: Optional[str] = None) -> Document:
-        """
-        Специальная обработка для расписания аудитории
-
-        Args:
-            document: объект документа Word
-            classroom_id: ID аудитории
-            day_of_week: день недели (если не указан, берется всё расписание)
-
-        Returns:
-            Обработанный документ Word
-        """
-        # Получаем аудиторию
-        classroom = await Classroom.get(id=classroom_id)
-
-        # Получаем расписание аудитории
-        schedule_query = ScheduleItem.filter(classroom_id=classroom_id).prefetch_related(
-            'time_slot', 'discipline', 'group', 'teacher'
-        )
-
-        # Если указан день недели, фильтруем по нему
-        if day_of_week:
-            schedule_query = schedule_query.filter(day_of_week=day_of_week)
-
-        # Получаем отсортированное расписание
-        schedule_items = await schedule_query.order_by('day_of_week', 'time_slot__number')
-
-        # Группируем расписание по дням недели
-        schedule_by_day = {}
-        for item in schedule_items:
-            day = item.day_of_week.value
-            if day not in schedule_by_day:
-                schedule_by_day[day] = []
-            schedule_by_day[day].append(item)
-
-        # Поиск таблицы для расписания в документе
-        schedule_table = None
         for table in document.tables:
-            # Ищем таблицу, в которой есть нужные заголовки
-            first_row_text = ' '.join([cell.text for cell in table.rows[0].cells])
-            if "День" in first_row_text and "Время" in first_row_text:
-                schedule_table = table
-                break
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        await self.replace_date_time_placeholders(paragraph, replacements)
 
-        # Если нашли таблицу расписания, заполняем её
-        if schedule_table:
-            # Определяем количество строк в таблице (исключая заголовок)
-            num_rows = len(schedule_table.rows)
+        await self.replace_highlighted_text(document, replacements)
 
-            # Если дней больше, чем строк (минус заголовок), добавляем строки
-            days_count = len(schedule_by_day)
-            if days_count > num_rows - 1:
-                for _ in range(days_count - (num_rows - 1)):
-                    schedule_table.add_row()
+    async def process_practice_report(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон отчета по практике
 
-            # Заполняем таблицу данными
-            row_index = 1  # Начинаем с первой строки после заголовка
-            for day, items in schedule_by_day.items():
-                if row_index < len(schedule_table.rows):
-                    row = schedule_table.rows[row_index]
+        U СЕМЕСТР
+        Группа - S
+        Студент - M
+        Руководитель практики - B
+        """
+        student_id = params.get('student_id')
+        teacher_id = params.get('teacher_id')
 
-                    # Заполняем день недели
-                    if len(row.cells) > 0:
-                        row.cells[0].text = day
+        replacements = {
+            'U': '7'
+        }
 
-                    # Формируем расписание на день
-                    schedule_text = ""
-                    for item in items:
-                        time_slot = f"{item.time_slot.start_time}-{item.time_slot.end_time}"
-                        discipline = item.discipline.name
-                        group = item.group.code
-                        teacher = item.teacher.full_name
+        if student_id:
+            student = await Student.get(id=student_id).prefetch_related('group')
+            replacements['M'] = student.full_name
 
-                        schedule_text += f"{time_slot}: {discipline}, {group}, {teacher}\n"
+            if student.group:
+                replacements['S'] = student.group.code
+            else:
+                replacements['S'] = "КМБО-05-21"
+        else:
+            replacements['M'] = "Иванов Иван Иванович"
+            replacements['S'] = "КМБО-05-21"
 
-                    # Заполняем расписание
-                    if len(row.cells) > 1:
-                        row.cells[1].text = schedule_text.strip()
+        if teacher_id:
+            teacher = await Teacher.get(id=teacher_id)
+            replacements['B'] = teacher.full_name
+        else:
+            replacements['B'] = "Петров Петр Петрович"
 
-                    row_index += 1
+        await self.replace_highlighted_text(document, replacements)
 
-        # Обновляем информацию об аудитории в документе
+    async def process_task(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон задания для курса
+
+        Обучающийся: N
+        Шифр: O
+        Группа: M
+        Тема выпускной квалификационной работы - G
+        """
+        student_id = params.get('student_id')
+
+        replacements = {}
+
+        if student_id:
+            student = await Student.get(id=student_id).prefetch_related('group')
+            replacements['N'] = student.full_name
+            replacements['O'] = "Александрова Виктория Петровна"
+
+            if student.group:
+                replacements['M'] = student.group.code
+            else:
+                replacements['M'] = "КМБО-05-21"
+
+            replacements['G'] = "Разработка информационной системы управления образовательным процессом"
+        else:
+
+            replacements['N'] = "Иванов Иван Иванович"
+            replacements['O'] = "Александрова Виктория Петровна"
+            replacements['M'] = "КМБО-05-21"
+            replacements['G'] = "Разработка информационной системы управления образовательным процессом"
+
+        await self.replace_highlighted_text(document, replacements)
+
+    async def process_classroom_schedule(self, document: Document, params: Dict[str, Any]) -> None:
+        """
+        Обрабатывает шаблон загруженности аудиторий с поддержкой разбитых плейсхолдеров времени
+        """
+        classroom_id = params.get('classroom_id')
+        group_id = params.get('group_id')
+        day_of_week = params.get('day_of_week')
+
+        group_id_2 = params.get('group_id_2', group_id)
+
+        group_name_1 = "КМБО-05-21"
+        group_name_2 = "КМБО-02-21"
+
+        if group_id:
+            try:
+                group = await Group.get(id=group_id)
+                group_name_1 = group.code
+            except:
+                pass
+
+        if group_id_2:
+            try:
+                group_2 = await Group.get(id=group_id_2)
+                group_name_2 = group_2.code
+            except:
+                pass
+
+        time_format_1 = "09:00 – 10:30"
+        time_format_2 = "10:40 – 12:10"
+        date_format = "01-05-2025"
+
+        if classroom_id:
+            query = ScheduleItem.filter(classroom_id=classroom_id).prefetch_related(
+                'time_slot', 'discipline', 'group', 'teacher'
+            )
+
+            if day_of_week:
+                query = query.filter(day_of_week=day_of_week)
+
+            schedule_items = await query.order_by('time_slot__number')
+
+            if schedule_items and len(schedule_items) > 0:
+
+                group_name_1 = schedule_items[0].group.code
+
+                if hasattr(schedule_items[0], 'time_slot') and schedule_items[0].time_slot:
+                    time_slot_1 = schedule_items[0].time_slot
+                    time_format_1 = f"{time_slot_1.start_time} – {time_slot_1.end_time}"
+
+                if len(schedule_items) > 1:
+                    group_name_2 = schedule_items[1].group.code
+                    if hasattr(schedule_items[1], 'time_slot') and schedule_items[1].time_slot:
+                        time_slot_2 = schedule_items[1].time_slot
+                        time_format_2 = f"{time_slot_2.start_time} – {time_slot_2.end_time}"
+
+        time_cells = []
+        cell_index = 0
+
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+
+                    cell_text = cell.text
+                    if "XX:XX" in cell_text or "XX-XX" in cell_text or "XX:" in cell_text:
+                        time_cells.append(cell)
+
+        for i, cell in enumerate(time_cells):
+            time_value = time_format_1 if i % 2 == 0 else time_format_2
+
+            for paragraph in cell.paragraphs:
+
+                has_x = False
+                runs_with_x = []
+
+                for run in paragraph.runs:
+                    if 'X' in run.text:
+                        has_x = True
+                        runs_with_x.append(run)
+
+                if has_x:
+
+                    if len(runs_with_x) == 1 and ("XX:XX" in runs_with_x[0].text):
+                        runs_with_x[0].text = runs_with_x[0].text.replace("XX:XX", time_value.split(' – ')[0])
+                        if hasattr(runs_with_x[0], 'font') and hasattr(runs_with_x[0].font, 'highlight_color'):
+                            runs_with_x[0].font.highlight_color = None
+
+
+                    elif "XX:XX" in paragraph.text:
+
+                        paragraph.text = paragraph.text.replace("XX:XX – XX:XX", time_value)
+                        paragraph.text = paragraph.text.replace("XX:XX-XX:XX", time_value.replace(" – ", "-"))
+
+
+                    else:
+
+                        for run in runs_with_x:
+                            if run.text == "XX:XX":
+                                run.text = time_value.split(' – ')[0]
+                            elif run.text == "XX:XX – XX:XX":
+                                run.text = time_value
+                            elif run.text == "XX:XX-XX:XX":
+                                run.text = time_value.replace(" – ", "-")
+                            else:
+
+                                new_text = ""
+                                for char in run.text:
+                                    if char == 'X':
+
+                                        if time_value:
+                                            new_text += time_value[0]
+                                            time_value = time_value[1:]
+                                        else:
+                                            new_text += '0'
+                                    else:
+                                        new_text += char
+                                run.text = new_text
+
+                            if hasattr(run, 'font') and hasattr(run.font, 'highlight_color'):
+                                run.font.highlight_color = None
+
+        highlighted_group_cells = []
+
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+
+                            if hasattr(run, 'font') and hasattr(run.font,
+                                                                'highlight_color') and run.font.highlight_color:
+                                if run.text.strip() == 'M' or run.text.strip() == 'М':
+                                    highlighted_group_cells.append((cell, run))
+
+        for i, (cell, run) in enumerate(highlighted_group_cells):
+            if i % 2 == 0:
+                run.text = group_name_1
+            else:
+                run.text = group_name_2
+
+            run.font.highlight_color = None
+
         for paragraph in document.paragraphs:
-            if "Загруженность аудитории:" in paragraph.text:
-                paragraph.text = f"Загруженность аудитории: {classroom.name}"
-                break
+            if "Загруженность аудиторий на " in paragraph.text:
 
-        # Если расписание пустое, добавляем сообщение
-        if not schedule_items:
-            for paragraph in document.paragraphs:
-                if "Загруженность" in paragraph.text:
-                    document.add_paragraph("В аудитории нет занятий в расписании.")
-                    break
+                date_placeholder = "XX-XX-XXXX"
+                if date_placeholder in paragraph.text:
+                    paragraph.text = paragraph.text.replace(date_placeholder, date_format)
 
-        return document
+    async def generic_default_replacing(self, document, params):
+        self.replacements = {}
+
+        group_id = params.get('group_id')
+        if group_id:
+            group = await Group.get(id=group_id).prefetch_related('students')
+            self.replacements.update({
+                "group": group.code,
+                "course": group.course,
+                "students": "\n".join([f"{student.full_name} ({student.email})" for student in group.students]),
+                "S": group.code,
+                "T": group.code,
+                "G": group.code
+            })
+
+        student_id = params.get('student_id')
+        if student_id:
+            student = await Student.get(id=student_id).prefetch_related('group')
+            self.replacements.update({
+                "student_name": student.full_name,
+                "student_email": student.email,
+                "G": student.full_name,
+                "M": student.full_name,
+                "N": student.full_name
+            })
+
+            if student.group:
+                self.replacements.update({
+                    "group": student.group.code,
+                    "S": student.group.code,
+                    "T": student.group.code
+                })
+
+        teacher_id = params.get('teacher_id')
+        if teacher_id:
+            teacher = await Teacher.get(id=teacher_id)
+            self.replacements.update({
+                "teacher_name": teacher.full_name,
+                "teacher_email": teacher.email,
+                "P": teacher.full_name,
+                "B": teacher.full_name,
+                "O": teacher.full_name,
+                "U": "к.т.н., доцент"
+            })
+
+        discipline_id = params.get('discipline_id')
+        if discipline_id:
+            discipline = await Discipline.get(id=discipline_id)
+            self.replacements.update({
+                "discipline": discipline.name,
+                "N": discipline.name
+            })
+
+        self.replacements.update({
+            "J": "Исследование методов и алгоритмов",
+            "L": "1",
+            "К": "1",
+            "XX-XX-XXXX": "01-05-2025",
+            "XX:XX-XX:XX": "09:00-10:30"
+        })
+
+        await self.replace_highlighted_text(document, self.replacements)
+
+        for paragraph in document.paragraphs:
+            if any(placeholder in paragraph.text for placeholder in self.replacements.keys()) or any(
+                    "{{" + placeholder + "}}" in paragraph.text for placeholder in self.replacements.keys()):
+                alignment = paragraph.alignment
+
+                new_text = await self.replace_placeholders_in_text(paragraph.text, self.replacements)
+
+                paragraph.clear()
+                run = paragraph.add_run(new_text)
+
+                run.font.name = "Times New Roman"
+
+                paragraph.alignment = alignment
+
+        for table in document.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        if any(placeholder in paragraph.text for placeholder in self.replacements.keys()) or any(
+                                "{{" + placeholder + "}}" in paragraph.text for placeholder in
+                                self.replacements.keys()):
+                            alignment = paragraph.alignment
+
+                            new_text = await self.replace_placeholders_in_text(paragraph.text, self.replacements)
+
+                            paragraph.clear()
+                            run = paragraph.add_run(new_text)
+
+                            run.font.name = "Times New Roman"
+
+                            paragraph.alignment = alignment
+
 
     async def process_document(self, document: Document, params: Dict[str, Any]) -> Document:
         """
@@ -426,169 +1255,47 @@ class DocxService(BaseDocumentService):
         Returns:
             Обработанный документ Word
         """
-        self.replacements = {}
 
-        # Извлекаем параметры
         template_id = params.get('template_id')
-        group_id = params.get('group_id')
-        student_id = params.get('student_id')
-        teacher_id = params.get('teacher_id')
-        discipline_id = params.get('discipline_id')
-        ticket_number = params.get('ticket_number')
-        day_of_week = params.get('day_of_week')
-        classroom_id = params.get('classroom_id')
 
-        # Получаем шаблон для определения его типа
         template = await self.get_template(template_id)
+        template_type = await self.determine_template_type(template_id, template.name)
 
-        # Определяем тип документа
-        is_exam_ticket = False
-        is_teacher_schedule = False
-        is_classroom_schedule = False
-
-        if "билет" in template.name.lower() or "ticket" in template.name.lower():
-            is_exam_ticket = True
-        elif "расписание_преподавателя" in template.name.lower() or "teacher_schedule" in template.name.lower():
-            is_teacher_schedule = True
-        elif "загруженность_аудитории" in template.name.lower() or "classroom_schedule" in template.name.lower():
-            is_classroom_schedule = True
-
-        # Собираем данные для обычной замены плейсхолдеров
-        # Данные группы
-        if group_id:
-            group = await Group.get(id=group_id).prefetch_related('students')
-            self.replacements.update({
-                "group": group.code,
-                "course": group.course,
-                "students": "\n".join([f"{student.full_name} ({student.email})" for student in group.students]),
-                "S": group.code  # Для одиночного плейсхолдера
-            })
-
-        # Данные студента
-        if student_id:
-            student = await Student.get(id=student_id).prefetch_related('group')
-            self.replacements.update({
-                "student_name": student.full_name,
-                "student_email": student.email,
-                "G": student.full_name,  # Для шаблона
-                "M": student.full_name  # Для одиночного плейсхолдера
-            })
-
-            if student.group:
-                self.replacements.update({
-                    "group": student.group.code,
-                    "S": student.group.code,  # Для одиночного плейсхолдера
-                })
-
-        # Данные преподавателя
-        if teacher_id:
-            teacher = await Teacher.get(id=teacher_id)
-            self.replacements.update({
-                "teacher_name": teacher.full_name,
-                "teacher_email": teacher.email,
-                "P": teacher.full_name,  # Для шаблона
-                "B": teacher.full_name  # Для одиночного плейсхолдера
-            })
-
-        # Данные дисциплины
-        discipline = None
-        highlights_replacements = None
-
-        if discipline_id:
-            discipline = await Discipline.get(id=discipline_id)
-            self.replacements.update({
-                "discipline": discipline.name,
-                "N": discipline.name,  # Для одиночного плейсхолдера
-            })
-
-            # Данные для желтых выделений
-            highlights_replacements = {
-                "discipline_name": discipline.name,
-                "institute": "ИПИ",  # Можно получать из модели или параметров
-                "department": f"БК №{discipline.department}" if discipline.department else "БК №536",
-                "education_level": discipline.education_level if discipline.education_level else "бакалавриат",
-                "hours": f"{discipline.hours_lecture}/{discipline.hours_practice}/{discipline.hours_lab}"
-            }
-
-            # Данные контрольных работ, если они есть
-            control_works = await ControlWork.filter(discipline_id=discipline_id).order_by('number')
-            if control_works:
-                highlights_replacements["control_works"] = [
-                    {
-                        "name": f"Контрольная работа №{work.number}" if work.number < 4 else "Тестирование",
-                        "format": work.format,
-                        "week": work.week,
-                        "max_score": work.max_score
-                    }
-                    for work in control_works[:4]  # Берем только первые 4 работы для БРС
-                ]
-
-        # Выполняем специальную обработку в зависимости от типа документа
-        if is_exam_ticket and discipline_id:
-            # Специальная обработка для экзаменационного билета
-            document = await self.process_exam_ticket(document, discipline, ticket_number)
-        elif is_teacher_schedule and teacher_id:
-            # Специальная обработка для расписания преподавателя
-            document = await self.process_teacher_schedule(document, teacher_id, day_of_week)
-        elif is_classroom_schedule and classroom_id:
-            # Специальная обработка для загруженности аудитории
-            document = await self.process_classroom_schedule(document, classroom_id, day_of_week)
+        if template_type == self.TEMPLATE_TYPE_MASTER_TITLE:
+            await self.process_master_title(document, params)
+        elif template_type == self.TEMPLATE_TYPE_BACHELOR_TITLE:
+            await self.process_bachelor_title(document, params)
+        elif template_type == self.TEMPLATE_TYPE_EXAM_TICKET:
+            await self.process_exam_ticket(document, params)
+        elif template_type == self.TEMPLATE_TYPE_ABSTRACT:
+            await self.process_abstract(document, params)
+        elif template_type == self.TEMPLATE_TYPE_LAB_WORK:
+            await self.process_lab_work(document, params)
+        elif template_type == self.TEMPLATE_TYPE_COURSE_WORK:
+            await self.process_course_work(document, params)
+        elif template_type == self.TEMPLATE_TYPE_COURSE_PROJECT:
+            await self.process_course_project(document, params)
+        elif template_type == self.TEMPLATE_TYPE_PRACTICE_THEMES:
+            await self.process_practice_themes(document, params)
+        elif template_type == self.TEMPLATE_TYPE_PUBLICATIONS:
+            await self.process_publications(document, params)
+        elif template_type == self.TEMPLATE_TYPE_LITERATURE:
+            await self.process_literature(document, params)
+        elif template_type == self.TEMPLATE_TYPE_EXAM_QUESTIONS:
+            await self.process_exam_questions(document, params)
+        elif template_type == self.TEMPLATE_TYPE_TEACHER_SCHEDULE:
+            await self.process_teacher_schedule(document, params)
+        elif template_type == self.TEMPLATE_TYPE_SECTION_PROGRAM:
+            await self.process_section_program(document, params)
+        elif template_type == self.TEMPLATE_TYPE_PRACTICE_REPORT:
+            await self.process_practice_report(document, params)
+        elif template_type == self.TEMPLATE_TYPE_TASK:
+            await self.process_task(document, params)
+        elif template_type == self.TEMPLATE_TYPE_CLASSROOM_SCHEDULE:
+            await self.process_classroom_schedule(document, params)
         else:
-            # Стандартная обработка для других типов документов
-            # Обрабатываем текст в параграфах
-            for paragraph in document.paragraphs:
-                if any(placeholder in paragraph.text for placeholder in self.replacements.keys()) or \
-                        any("{{" + placeholder + "}}" in paragraph.text for placeholder in self.replacements.keys()):
-                    # Сохраняем выравнивание
-                    alignment = paragraph.alignment
+            await self.generic_default_replacing(document, params)
 
-                    # Получаем текст с замененными плейсхолдерами
-                    new_text = await self.replace_placeholders_in_text(paragraph.text, self.replacements)
-
-                    # Заменяем текст параграфа
-                    paragraph.clear()
-                    run = paragraph.add_run(new_text)
-
-                    # Устанавливаем шрифт Times New Roman
-                    run.font.name = "Times New Roman"
-
-                    # Восстанавливаем выравнивание
-                    paragraph.alignment = alignment
-
-            # Обрабатываем текст в таблицах (если есть)
-            for table in document.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            if any(placeholder in paragraph.text for placeholder in self.replacements.keys()) or \
-                                    any("{{" + placeholder + "}}" in paragraph.text for placeholder in
-                                        self.replacements.keys()):
-                                # Сохраняем выравнивание
-                                alignment = paragraph.alignment
-
-                                # Получаем текст с замененными плейсхолдерами
-                                new_text = await self.replace_placeholders_in_text(paragraph.text, self.replacements)
-
-                                # Заменяем текст параграфа
-                                paragraph.clear()
-                                run = paragraph.add_run(new_text)
-
-                                # Устанавливаем шрифт Times New Roman
-                                run.font.name = "Times New Roman"
-
-                                # Восстанавливаем выравнивание
-                                paragraph.alignment = alignment
-
-            # Если есть данные дисциплины, обрабатываем желтые выделения
-            if discipline_id and highlights_replacements:
-                try:
-                    # Проверяем, является ли шаблон БРС документом
-                    if "бр" in template.name.lower() or "рейтинг" in template.name.lower():
-                        await self.replace_yellow_highlights(document, highlights_replacements)
-                except Exception as e:
-                    print(f"Ошибка при обработке желтых выделений: {str(e)}")
-
-        # Применяем Times New Roman ко всему документу
         await self.apply_times_new_roman(document)
 
         return document

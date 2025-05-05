@@ -21,7 +21,8 @@ class ReportService:
             classroom_id: Optional[int] = None,
             start_date: Optional[datetime] = None,
             ticket_number: Optional[int] = None,
-            day_of_week: Optional[str] = None
+            day_of_week: Optional[str] = None,
+            group_id_2: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Генерирует отчет на основе шаблона и предоставленных данных
@@ -36,15 +37,14 @@ class ReportService:
             start_date: Начальная дата для журнала (опционально)
             ticket_number: Номер билета для экзаменационных билетов (опционально)
             day_of_week: День недели для расписания (опционально)
+            group_id_2: ID второй группы для загруженности аудиторий (опционально)
 
         Returns:
             Dict с информацией о сгенерированном файле
         """
         try:
-            # Получаем шаблон
             template = await Template.get(id=template_id)
 
-            # Подготавливаем параметры для генерации документа
             params = {
                 'template_id': template_id,
                 'group_id': group_id,
@@ -54,27 +54,18 @@ class ReportService:
                 'classroom_id': classroom_id,
                 'start_date': start_date,
                 'ticket_number': ticket_number,
-                'day_of_week': day_of_week
+                'day_of_week': day_of_week,
+                'group_id_2': group_id_2
             }
 
-            # Используем фабрику для получения нужного сервиса
             service = await DocumentServiceFactory.get_service(template_id)
-
-            # Генерируем документ
             file_path = await service.generate_document(template_id, params)
 
-            # Возвращаем информацию о созданном файле
             return {
                 "message": "Отчет успешно сгенерирован и сохранён!",
                 "file_path": file_path,
                 "file_type": template.file_type
             }
-
-        except Template.DoesNotExist:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Шаблон с ID {template_id} не найден"
-            )
 
         except FileNotFoundError as e:
             raise HTTPException(

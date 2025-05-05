@@ -21,6 +21,7 @@ async def create_report(
         start_date: Optional[str] = Query(None, description="Начальная дата для журнала (формат: YYYY-MM-DD)"),
         ticket_number: Optional[int] = Query(None, description="Номер билета (для экзаменационных билетов)"),
         day_of_week: Optional[str] = Query(None, description="День недели (для расписания)"),
+        group_id_2: Optional[int] = Query(None, description="ID второй группы (для загруженности аудиторий)"),
         download: bool = Query(False, description="Скачать файл напрямую")
 ):
     """
@@ -32,6 +33,7 @@ async def create_report(
     - /officesvc/report?template_id=3&group_id=1&discipline_id=1&start_date=2025-04-01
     - /officesvc/report?template_id=4&teacher_id=1&day_of_week=Понедельник
     - /officesvc/report?template_id=5&classroom_id=1&day_of_week=Вторник
+    - /officesvc/report?template_id=24&classroom_id=1&group_id=1&group_id_2=2
     """
     # Проверяем наличие обязательных параметров
     if not template_id:
@@ -68,7 +70,8 @@ async def create_report(
         classroom_id=classroom_id,
         start_date=parsed_start_date,
         ticket_number=ticket_number,
-        day_of_week=day_of_week
+        day_of_week=day_of_week,
+        group_id_2=group_id_2
     )
 
     # Если запрошено скачивание, возвращаем файл
@@ -81,7 +84,6 @@ async def create_report(
 
     # Иначе возвращаем информацию о файле
     return result
-
 
 @router.get("/officesvc/templates", response_model=List[dict])
 async def list_templates():
